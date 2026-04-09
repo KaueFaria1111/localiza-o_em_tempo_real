@@ -9,9 +9,15 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
 
-const PORT = 3000;
+const io = new Server(server, {
+    cors: {
+        origin: true,
+        credentials: true
+    }
+});
+
+const PORT = process.env.PORT || 3000;
 
 // cria pasta uploads se não existir
 const uploadDir = path.join(__dirname, "uploads");
@@ -19,7 +25,11 @@ if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir);
 }
 
-app.use(cors());
+app.use(cors({
+    origin: true,
+    credentials: true
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -27,7 +37,12 @@ app.use(
     session({
         secret: "segredo-super-seguro",
         resave: false,
-        saveUninitialized: false
+        saveUninitialized: false,
+        cookie: {
+            secure: false, // se usar https + proxy em produção, depois pode ajustar
+            httpOnly: true,
+            sameSite: "lax"
+        }
     })
 );
 
@@ -37,7 +52,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // upload
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, "uploads/");
+        cb(null, uploadDir);
     },
     filename: (req, file, cb) => {
         const fileName = `${Date.now()}-${file.originalname.replace(/\s+/g, "-")}`;
@@ -101,6 +116,7 @@ app.post("/api/register", upload.single("photo"), (req, res) => {
             }
         });
     } catch (error) {
+        console.error("Erro ao cadastrar usuário:", error);
         res.status(500).json({ error: "Erro ao cadastrar usuário." });
     }
 });
@@ -130,6 +146,7 @@ app.post("/api/login", (req, res) => {
             }
         });
     } catch (error) {
+        console.error("Erro ao fazer login:", error);
         res.status(500).json({ error: "Erro ao fazer login." });
     }
 });
@@ -193,7 +210,7 @@ app.post("/api/location", (req, res) => {
     res.json({ message: "Localização atualizada com sucesso." });
 });
 
-// remover usuário ao sair
+// sair e remover do mapa, mas manter cadastro
 app.post("/api/remove-user", (req, res) => {
     const userId = req.session.userId;
 
@@ -201,24 +218,33 @@ app.post("/api/remove-user", (req, res) => {
         return res.status(401).json({ error: "Não autenticado." });
     }
 
-    const index = users.findIndex((u) => u.id === userId);
+    const user = users.find((u) => u.id === userId);
 
-    if (index === -1) {
+    if (!user) {
         return res.status(404).json({ error: "Usuário não encontrado." });
     }
 
-    const removedUser = users.splice(index, 1)[0];
+    user.lat = null;
+    user.lng = null;
 
-    io.emit("userRemoved", { id: removedUser.id });
+    io.emit("userRemoved", { id: user.id });
 
-    req.session.destroy(() => {
-        res.json({ message: "Usuário removido com sucesso." });
+    req.session.destroy((err) => {
+        if (err) {
+            return res.status(500).json({ error: "Erro ao encerrar sessão." });
+        }
+
+        res.json({ message: "Usuário saiu com sucesso." });
     });
 });
 
-// logout comum, caso ainda queira manter
+// logout comum
 app.post("/api/logout", (req, res) => {
-    req.session.destroy(() => {
+    req.session.destroy((err) => {
+        if (err) {
+            return res.status(500).json({ error: "Erro ao fazer logout." });
+        }
+
         res.json({ message: "Logout realizado com sucesso." });
     });
 });

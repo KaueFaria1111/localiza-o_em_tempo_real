@@ -53,9 +53,11 @@ function buildAvatarHTML(user) {
 }
 
 function buildUserCardHTML(user) {
+    const initial = user.name ? user.name.charAt(0).toUpperCase() : "?";
+
     const avatar = user.photo
         ? `<div class="user-avatar"><img src="${user.photo}" alt="${user.name}" /></div>`
-        : `<div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>`;
+        : `<div class="user-avatar">${initial}</div>`;
 
     return `
     <div class="user-badge">
@@ -96,7 +98,10 @@ function popupHTML(user) {
 }
 
 function addOrUpdateMarker(user) {
-    if (user.lat == null || user.lng == null) return;
+    if (user.lat == null || user.lng == null) {
+        removeMarker(user.id);
+        return;
+    }
 
     if (markers[user.id]) {
         markers[user.id].setLatLng([user.lat, user.lng]);
@@ -120,8 +125,23 @@ function removeMarker(userId) {
 
 async function loadUsers() {
     try {
-        const response = await fetch("/api/users");
+        const response = await fetch("/api/users", {
+            credentials: "include"
+        });
+
         const users = await response.json();
+
+        const activeIds = new Set(
+            users
+                .filter((user) => user.lat != null && user.lng != null)
+                .map((user) => String(user.id))
+        );
+
+        Object.keys(markers).forEach((id) => {
+            if (!activeIds.has(String(id))) {
+                removeMarker(id);
+            }
+        });
 
         users.forEach((user) => addOrUpdateMarker(user));
     } catch (error) {
@@ -131,7 +151,9 @@ async function loadUsers() {
 
 async function checkLoggedUser() {
     try {
-        const response = await fetch("/api/me");
+        const response = await fetch("/api/me", {
+            credentials: "include"
+        });
 
         if (!response.ok) {
             currentUser = null;
@@ -222,6 +244,7 @@ registerForm.addEventListener("submit", async (e) => {
     try {
         const response = await fetch("/api/register", {
             method: "POST",
+            credentials: "include",
             body: formData
         });
 
@@ -238,6 +261,7 @@ registerForm.addEventListener("submit", async (e) => {
         loggedUserCard.innerHTML = buildUserCardHTML(currentUser);
 
         setMessage(data.message);
+        await loadUsers();
     } catch (error) {
         setMessage("Erro no cadastro.", true);
     }
@@ -254,6 +278,7 @@ loginForm.addEventListener("submit", async (e) => {
             headers: {
                 "Content-Type": "application/json"
             },
+            credentials: "include",
             body: JSON.stringify({
                 email: formData.get("email"),
                 password: formData.get("password")
@@ -273,6 +298,7 @@ loginForm.addEventListener("submit", async (e) => {
         loggedUserCard.innerHTML = buildUserCardHTML(currentUser);
 
         setMessage(data.message);
+        await loadUsers();
     } catch (error) {
         setMessage("Erro ao fazer login.", true);
     }
@@ -287,7 +313,8 @@ logoutBtn.addEventListener("click", async () => {
         const userIdToRemove = currentUser ? currentUser.id : null;
 
         const response = await fetch("/api/remove-user", {
-            method: "POST"
+            method: "POST",
+            credentials: "include"
         });
 
         const data = await response.json();
@@ -305,6 +332,8 @@ logoutBtn.addEventListener("click", async () => {
         loggedArea.classList.add("hidden");
         loggedUserCard.innerHTML = "";
 
+        await loadUsers();
+
         setMessage(data.message);
     } catch (error) {
         setMessage("Erro ao sair.", true);
@@ -313,3 +342,6 @@ logoutBtn.addEventListener("click", async () => {
 
 loadUsers();
 checkLoggedUser();
+
+// atualização periódica extra para garantir sincronização do mapa
+setInterval(loadUsers, 5000);
