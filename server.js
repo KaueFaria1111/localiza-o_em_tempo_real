@@ -193,7 +193,30 @@ app.post("/api/location", (req, res) => {
     res.json({ message: "Localização atualizada com sucesso." });
 });
 
-// logout
+// remover usuário ao sair
+app.post("/api/remove-user", (req, res) => {
+    const userId = req.session.userId;
+
+    if (!userId) {
+        return res.status(401).json({ error: "Não autenticado." });
+    }
+
+    const index = users.findIndex((u) => u.id === userId);
+
+    if (index === -1) {
+        return res.status(404).json({ error: "Usuário não encontrado." });
+    }
+
+    const removedUser = users.splice(index, 1)[0];
+
+    io.emit("userRemoved", { id: removedUser.id });
+
+    req.session.destroy(() => {
+        res.json({ message: "Usuário removido com sucesso." });
+    });
+});
+
+// logout comum, caso ainda queira manter
 app.post("/api/logout", (req, res) => {
     req.session.destroy(() => {
         res.json({ message: "Logout realizado com sucesso." });

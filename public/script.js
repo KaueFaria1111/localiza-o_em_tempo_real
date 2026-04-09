@@ -79,9 +79,11 @@ function createCustomIcon(user) {
 }
 
 function popupHTML(user) {
+    const initial = user.name ? user.name.charAt(0).toUpperCase() : "?";
+
     const photoHtml = user.photo
         ? `<img src="${user.photo}" alt="${user.name}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;" />`
-        : `<div style="width:60px;height:60px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;">${user.name.charAt(0).toUpperCase()}</div>`;
+        : `<div style="width:60px;height:60px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;">${initial}</div>`;
 
     return `
     <div style="display:flex;align-items:center;gap:10px;">
@@ -106,6 +108,13 @@ function addOrUpdateMarker(user) {
         })
             .addTo(map)
             .bindPopup(popupHTML(user));
+    }
+}
+
+function removeMarker(userId) {
+    if (markers[userId]) {
+        map.removeLayer(markers[userId]);
+        delete markers[userId];
     }
 }
 
@@ -165,7 +174,6 @@ function startRealtimeLocation() {
             currentUser.lng = lng;
 
             addOrUpdateMarker(currentUser);
-
             map.setView([lat, lng], 16);
 
             socket.emit("updateLocation", {
@@ -200,6 +208,10 @@ function stopRealtimeLocation() {
 
 socket.on("userLocationUpdated", (user) => {
     addOrUpdateMarker(user);
+});
+
+socket.on("userRemoved", (data) => {
+    removeMarker(data.id);
 });
 
 registerForm.addEventListener("submit", async (e) => {
@@ -272,14 +284,27 @@ logoutBtn.addEventListener("click", async () => {
     try {
         stopRealtimeLocation();
 
-        const response = await fetch("/api/logout", {
+        const userIdToRemove = currentUser ? currentUser.id : null;
+
+        const response = await fetch("/api/remove-user", {
             method: "POST"
         });
 
         const data = await response.json();
 
+        if (!response.ok) {
+            setMessage(data.error || "Erro ao sair.", true);
+            return;
+        }
+
+        if (userIdToRemove) {
+            removeMarker(userIdToRemove);
+        }
+
         currentUser = null;
         loggedArea.classList.add("hidden");
+        loggedUserCard.innerHTML = "";
+
         setMessage(data.message);
     } catch (error) {
         setMessage("Erro ao sair.", true);
