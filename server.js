@@ -19,10 +19,13 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
+// importante para ambientes com proxy, como Render
+app.set("trust proxy", 1);
+
 // cria pasta uploads se não existir
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
+    fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 app.use(cors({
@@ -35,18 +38,18 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(
     session({
-        secret: "segredo-super-seguro",
+        secret: process.env.SESSION_SECRET || "segredo-super-seguro",
         resave: false,
         saveUninitialized: false,
         cookie: {
-            secure: false, // se usar https + proxy em produção, depois pode ajustar
+            secure: false,
             httpOnly: true,
             sameSite: "lax"
         }
     })
 );
 
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(uploadDir));
 app.use(express.static(path.join(__dirname, "public")));
 
 // upload
@@ -55,8 +58,8 @@ const storage = multer.diskStorage({
         cb(null, uploadDir);
     },
     filename: (req, file, cb) => {
-        const fileName = `${Date.now()}-${file.originalname.replace(/\s+/g, "-")}`;
-        cb(null, fileName);
+        const safeName = file.originalname.replace(/\s+/g, "-");
+        cb(null, `${Date.now()}-${safeName}`);
     }
 });
 
@@ -77,6 +80,27 @@ const users = [];
 }
 */
 
+function sanitizeUser(user) {
+    return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        photo: user.photo,
+        lat: user.lat,
+        lng: user.lng
+    };
+}
+
+function sanitizePublicUser(user) {
+    return {
+        id: user.id,
+        name: user.name,
+        photo: user.photo,
+        lat: user.lat,
+        lng: user.lng
+    };
+}
+
 // cadastro
 app.post("/api/register", upload.single("photo"), (req, res) => {
     try {
@@ -86,16 +110,18 @@ app.post("/api/register", upload.single("photo"), (req, res) => {
             return res.status(400).json({ error: "Preencha nome, e-mail e senha." });
         }
 
-        const exists = users.find((u) => u.email === email);
+        const normalizedEmail = String(email).trim().toLowerCase();
+
+        const exists = users.find((u) => u.email === normalizedEmail);
         if (exists) {
             return res.status(400).json({ error: "E-mail já cadastrado." });
         }
 
         const newUser = {
             id: Date.now().toString(),
-            name,
-            email,
-            password,
+            name: String(name).trim(),
+            email: normalizedEmail,
+            password: String(password),
             photo: req.file ? `/uploads/${req.file.filename}` : null,
             lat: null,
             lng: null
@@ -104,20 +130,13 @@ app.post("/api/register", upload.single("photo"), (req, res) => {
         users.push(newUser);
         req.session.userId = newUser.id;
 
-        res.status(201).json({
+        return res.status(201).json({
             message: "Usuário cadastrado com sucesso.",
-            user: {
-                id: newUser.id,
-                name: newUser.name,
-                email: newUser.email,
-                photo: newUser.photo,
-                lat: newUser.lat,
-                lng: newUser.lng
-            }
+            user: sanitizeUser(newUser)
         });
     } catch (error) {
         console.error("Erro ao cadastrar usuário:", error);
-        res.status(500).json({ error: "Erro ao cadastrar usuário." });
+        return res.status(500).json({ error: "Erro ao cadastrar usuário." });
     }
 });
 
@@ -126,7 +145,11 @@ app.post("/api/login", (req, res) => {
     try {
         const { email, password } = req.body;
 
-        const user = users.find((u) => u.email === email && u.password === password);
+        const normalizedEmail = String(email || "").trim().toLowerCase();
+
+        const user = users.find(
+            (u) => u.email === normalizedEmail && u.password === String(password || "")
+        );
 
         if (!user) {
             return res.status(401).json({ error: "E-mail ou senha inválidos." });
@@ -134,20 +157,13 @@ app.post("/api/login", (req, res) => {
 
         req.session.userId = user.id;
 
-        res.json({
+        return res.json({
             message: "Login realizado com sucesso.",
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                photo: user.photo,
-                lat: user.lat,
-                lng: user.lng
-            }
+            user: sanitizeUser(user)
         });
     } catch (error) {
         console.error("Erro ao fazer login:", error);
-        res.status(500).json({ error: "Erro ao fazer login." });
+        return res.status(500).json({ error: "Erro ao fazer login." });
     }
 });
 
@@ -159,27 +175,12 @@ app.get("/api/me", (req, res) => {
         return res.status(401).json({ error: "Não autenticado." });
     }
 
-    res.json({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        photo: user.photo,
-        lat: user.lat,
-        lng: user.lng
-    });
+    return res.json(sanitizeUser(user));
 });
 
 // listar usuários
 app.get("/api/users", (req, res) => {
-    const safeUsers = users.map((u) => ({
-        id: u.id,
-        name: u.name,
-        photo: u.photo,
-        lat: u.lat,
-        lng: u.lng
-    }));
-
-    res.json(safeUsers);
+    return res.json(users.map(sanitizePublicUser));
 });
 
 // atualizar localização por HTTP
@@ -199,18 +200,12 @@ app.post("/api/location", (req, res) => {
     user.lat = lat;
     user.lng = lng;
 
-    io.emit("userLocationUpdated", {
-        id: user.id,
-        name: user.name,
-        photo: user.photo,
-        lat: user.lat,
-        lng: user.lng
-    });
+    io.emit("userLocationUpdated", sanitizePublicUser(user));
 
-    res.json({ message: "Localização atualizada com sucesso." });
+    return res.json({ message: "Localização atualizada com sucesso." });
 });
 
-// sair e remover do mapa, mas manter cadastro
+// sair e remover do mapa, mantendo cadastro
 app.post("/api/remove-user", (req, res) => {
     const userId = req.session.userId;
 
@@ -234,7 +229,7 @@ app.post("/api/remove-user", (req, res) => {
             return res.status(500).json({ error: "Erro ao encerrar sessão." });
         }
 
-        res.json({ message: "Usuário saiu com sucesso." });
+        return res.json({ message: "Usuário saiu com sucesso." });
     });
 });
 
@@ -245,7 +240,7 @@ app.post("/api/logout", (req, res) => {
             return res.status(500).json({ error: "Erro ao fazer logout." });
         }
 
-        res.json({ message: "Logout realizado com sucesso." });
+        return res.json({ message: "Logout realizado com sucesso." });
     });
 });
 
@@ -254,7 +249,7 @@ io.on("connection", (socket) => {
     console.log("Cliente conectado:", socket.id);
 
     socket.on("updateLocation", (data) => {
-        const { userId, lat, lng } = data;
+        const { userId, lat, lng } = data || {};
 
         if (!userId || typeof lat !== "number" || typeof lng !== "number") {
             return;
@@ -266,13 +261,7 @@ io.on("connection", (socket) => {
         user.lat = lat;
         user.lng = lng;
 
-        io.emit("userLocationUpdated", {
-            id: user.id,
-            name: user.name,
-            photo: user.photo,
-            lat: user.lat,
-            lng: user.lng
-        });
+        io.emit("userLocationUpdated", sanitizePublicUser(user));
     });
 
     socket.on("disconnect", () => {
