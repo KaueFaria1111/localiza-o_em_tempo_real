@@ -1,274 +1,368 @@
-const express = require("express");
-const cors = require("cors");
-const session = require("express-session");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const http = require("http");
-const { Server } = require("socket.io");
+const socket = io();
 
-const app = express();
-const server = http.createServer(app);
+const map = L.map("map").setView([-14.235, -51.9253], 4);
 
-const io = new Server(server, {
-    cors: {
-        origin: true,
-        credentials: true
-    }
-});
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
 
-const PORT = process.env.PORT || 3000;
+const tabRegister = document.getElementById("tabRegister");
+const tabLogin = document.getElementById("tabLogin");
+const registerForm = document.getElementById("registerForm");
+const loginForm = document.getElementById("loginForm");
+const loggedArea = document.getElementById("loggedArea");
+const loggedUserCard = document.getElementById("loggedUserCard");
+const messageEl = document.getElementById("message");
+const startTrackingBtn = document.getElementById("startTrackingBtn");
+const logoutBtn = document.getElementById("logoutBtn");
 
-// importante para ambientes com proxy, como Render
-app.set("trust proxy", 1);
+let currentUser = null;
+let watchId = null;
+const markers = {};
 
-// cria pasta uploads se não existir
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+function setMessage(text, isError = false) {
+    messageEl.textContent = text || "";
+    messageEl.style.color = isError ? "#dc2626" : "#111827";
 }
 
-app.use(cors({
-    origin: true,
-    credentials: true
-}));
+function getInitial(name = "") {
+    return name.trim().charAt(0).toUpperCase() || "?";
+}
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+function getPhotoUrl(photo) {
+    if (!photo) return null;
+    return photo;
+}
 
-app.use(
-    session({
-        secret: process.env.SESSION_SECRET || "segredo-super-seguro",
-        resave: false,
-        saveUninitialized: false,
-        cookie: {
-            secure: false,
-            httpOnly: true,
-            sameSite: "lax"
+function createAvatarHTML(user) {
+    const photoUrl = getPhotoUrl(user.photo);
+
+    if (photoUrl) {
+        return `
+            <div class="marker-avatar">
+                <img src="${photoUrl}" alt="${user.name}">
+            </div>
+        `;
+    }
+
+    return `
+        <div class="marker-avatar">
+            ${getInitial(user.name)}
+        </div>
+    `;
+}
+
+function createUserCardHTML(user) {
+    const photoUrl = getPhotoUrl(user.photo);
+
+    return `
+        <div class="user-badge">
+            <div class="user-avatar">
+                ${photoUrl
+            ? `<img src="${photoUrl}" alt="${user.name}">`
+            : getInitial(user.name)
         }
-    })
-);
+            </div>
+            <div>
+                <strong>${user.name}</strong>
+                <div>${user.email || ""}</div>
+            </div>
+        </div>
+    `;
+}
 
-app.use("/uploads", express.static(uploadDir));
-app.use(express.static(path.join(__dirname, "public")));
+function createPopupHTML(user) {
+    const photoUrl = getPhotoUrl(user.photo);
 
-// upload
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        const safeName = file.originalname.replace(/\s+/g, "-");
-        cb(null, `${Date.now()}-${safeName}`);
+    return `
+        <div class="popup-user">
+            <div class="marker-avatar">
+                ${photoUrl
+            ? `<img src="${photoUrl}" alt="${user.name}">`
+            : getInitial(user.name)
+        }
+            </div>
+            <div>
+                <strong>${user.name}</strong>
+                <span>Usuário em tempo real</span>
+            </div>
+        </div>
+    `;
+}
+
+function createMarkerIcon(user) {
+    return L.divIcon({
+        className: "custom-marker",
+        html: createAvatarHTML(user),
+        iconSize: [42, 42],
+        iconAnchor: [21, 21],
+        popupAnchor: [0, -20]
+    });
+}
+
+function upsertUserMarker(user) {
+    if (typeof user.lat !== "number" || typeof user.lng !== "number") {
+        removeUserMarker(user.id);
+        return;
     }
-});
 
-const upload = multer({ storage });
+    if (markers[user.id]) {
+        markers[user.id].setLatLng([user.lat, user.lng]);
+        markers[user.id].setIcon(createMarkerIcon(user));
+        markers[user.id].setPopupContent(createPopupHTML(user));
+        return;
+    }
 
-// banco fake em memória
-const users = [];
+    const marker = L.marker([user.lat, user.lng], {
+        icon: createMarkerIcon(user)
+    }).addTo(map);
 
-/*
-{
-  id,
-  name,
-  email,
-  password,
-  photo,
-  lat,
-  lng
-}
-*/
-
-function sanitizeUser(user) {
-    return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        photo: user.photo,
-        lat: user.lat,
-        lng: user.lng
-    };
+    marker.bindPopup(createPopupHTML(user));
+    markers[user.id] = marker;
 }
 
-function sanitizePublicUser(user) {
-    return {
-        id: user.id,
-        name: user.name,
-        photo: user.photo,
-        lat: user.lat,
-        lng: user.lng
-    };
+function removeUserMarker(userId) {
+    if (!markers[userId]) return;
+    map.removeLayer(markers[userId]);
+    delete markers[userId];
 }
 
-// cadastro
-app.post("/api/register", upload.single("photo"), (req, res) => {
+function showLoggedArea(user) {
+    currentUser = user;
+    registerForm.classList.add("hidden");
+    loginForm.classList.add("hidden");
+    loggedArea.classList.remove("hidden");
+    tabRegister.classList.remove("active");
+    tabLogin.classList.remove("active");
+    loggedUserCard.innerHTML = createUserCardHTML(user);
+}
+
+function showRegister() {
+    registerForm.classList.remove("hidden");
+    loginForm.classList.add("hidden");
+    loggedArea.classList.add("hidden");
+    tabRegister.classList.add("active");
+    tabLogin.classList.remove("active");
+}
+
+function showLogin() {
+    registerForm.classList.add("hidden");
+    loginForm.classList.remove("hidden");
+    loggedArea.classList.add("hidden");
+    tabRegister.classList.remove("active");
+    tabLogin.classList.add("active");
+}
+
+async function loadUsers() {
     try {
-        const { name, email, password } = req.body;
+        const response = await fetch("/api/users");
+        const users = await response.json();
 
-        if (!name || !email || !password) {
-            return res.status(400).json({ error: "Preencha nome, e-mail e senha." });
-        }
-
-        const normalizedEmail = String(email).trim().toLowerCase();
-
-        const exists = users.find((u) => u.email === normalizedEmail);
-        if (exists) {
-            return res.status(400).json({ error: "E-mail já cadastrado." });
-        }
-
-        const newUser = {
-            id: Date.now().toString(),
-            name: String(name).trim(),
-            email: normalizedEmail,
-            password: String(password),
-            photo: req.file ? `/uploads/${req.file.filename}` : null,
-            lat: null,
-            lng: null
-        };
-
-        users.push(newUser);
-        req.session.userId = newUser.id;
-
-        return res.status(201).json({
-            message: "Usuário cadastrado com sucesso.",
-            user: sanitizeUser(newUser)
+        users.forEach((user) => {
+            if (typeof user.lat === "number" && typeof user.lng === "number") {
+                upsertUserMarker(user);
+            }
         });
     } catch (error) {
-        console.error("Erro ao cadastrar usuário:", error);
-        return res.status(500).json({ error: "Erro ao cadastrar usuário." });
+        console.error("Erro ao carregar usuários:", error);
     }
-});
+}
 
-// login
-app.post("/api/login", (req, res) => {
+async function loadMe() {
     try {
-        const { email, password } = req.body;
+        const response = await fetch("/api/me");
 
-        const normalizedEmail = String(email || "").trim().toLowerCase();
-
-        const user = users.find(
-            (u) => u.email === normalizedEmail && u.password === String(password || "")
-        );
-
-        if (!user) {
-            return res.status(401).json({ error: "E-mail ou senha inválidos." });
-        }
-
-        req.session.userId = user.id;
-
-        return res.json({
-            message: "Login realizado com sucesso.",
-            user: sanitizeUser(user)
-        });
-    } catch (error) {
-        console.error("Erro ao fazer login:", error);
-        return res.status(500).json({ error: "Erro ao fazer login." });
-    }
-});
-
-// usuário logado
-app.get("/api/me", (req, res) => {
-    const user = users.find((u) => u.id === req.session.userId);
-
-    if (!user) {
-        return res.status(401).json({ error: "Não autenticado." });
-    }
-
-    return res.json(sanitizeUser(user));
-});
-
-// listar usuários
-app.get("/api/users", (req, res) => {
-    return res.json(users.map(sanitizePublicUser));
-});
-
-// atualizar localização por HTTP
-app.post("/api/location", (req, res) => {
-    const { userId, lat, lng } = req.body;
-
-    if (!userId || typeof lat !== "number" || typeof lng !== "number") {
-        return res.status(400).json({ error: "Dados de localização inválidos." });
-    }
-
-    const user = users.find((u) => u.id === userId);
-
-    if (!user) {
-        return res.status(404).json({ error: "Usuário não encontrado." });
-    }
-
-    user.lat = lat;
-    user.lng = lng;
-
-    io.emit("userLocationUpdated", sanitizePublicUser(user));
-
-    return res.json({ message: "Localização atualizada com sucesso." });
-});
-
-// sair e remover do mapa, mantendo cadastro
-app.post("/api/remove-user", (req, res) => {
-    const userId = req.session.userId;
-
-    if (!userId) {
-        return res.status(401).json({ error: "Não autenticado." });
-    }
-
-    const user = users.find((u) => u.id === userId);
-
-    if (!user) {
-        return res.status(404).json({ error: "Usuário não encontrado." });
-    }
-
-    user.lat = null;
-    user.lng = null;
-
-    io.emit("userRemoved", { id: user.id });
-
-    req.session.destroy((err) => {
-        if (err) {
-            return res.status(500).json({ error: "Erro ao encerrar sessão." });
-        }
-
-        return res.json({ message: "Usuário saiu com sucesso." });
-    });
-});
-
-// logout comum
-app.post("/api/logout", (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            return res.status(500).json({ error: "Erro ao fazer logout." });
-        }
-
-        return res.json({ message: "Logout realizado com sucesso." });
-    });
-});
-
-// socket.io
-io.on("connection", (socket) => {
-    console.log("Cliente conectado:", socket.id);
-
-    socket.on("updateLocation", (data) => {
-        const { userId, lat, lng } = data || {};
-
-        if (!userId || typeof lat !== "number" || typeof lng !== "number") {
+        if (!response.ok) {
+            showRegister();
             return;
         }
 
-        const user = users.find((u) => u.id === userId);
-        if (!user) return;
+        const user = await response.json();
+        showLoggedArea(user);
+    } catch (error) {
+        console.error("Erro ao carregar usuário logado:", error);
+    }
+}
 
-        user.lat = lat;
-        user.lng = lng;
+async function sendLocation(lat, lng) {
+    if (!currentUser) return;
 
-        io.emit("userLocationUpdated", sanitizePublicUser(user));
+    socket.emit("updateLocation", {
+        userId: currentUser.id,
+        lat,
+        lng
     });
 
-    socket.on("disconnect", () => {
-        console.log("Cliente desconectado:", socket.id);
-    });
+    try {
+        await fetch("/api/location", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                userId: currentUser.id,
+                lat,
+                lng
+            })
+        });
+    } catch (error) {
+        console.error("Erro ao enviar localização:", error);
+    }
+}
+
+function startTracking() {
+    if (!currentUser) {
+        setMessage("Faça login primeiro.", true);
+        return;
+    }
+
+    if (!navigator.geolocation) {
+        setMessage("Seu navegador não suporta geolocalização.", true);
+        return;
+    }
+
+    if (watchId !== null) {
+        setMessage("A localização já está ativa.");
+        return;
+    }
+
+    watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            currentUser.lat = lat;
+            currentUser.lng = lng;
+
+            upsertUserMarker(currentUser);
+            map.setView([lat, lng], 16);
+
+            await sendLocation(lat, lng);
+            setMessage("Localização em tempo real ativada.");
+        },
+        (error) => {
+            console.error(error);
+            setMessage("Não foi possível obter sua localização.", true);
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+        }
+    );
+}
+
+function stopTracking() {
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+}
+
+tabRegister.addEventListener("click", showRegister);
+tabLogin.addEventListener("click", showLogin);
+
+registerForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+        const formData = new FormData(registerForm);
+
+        const response = await fetch("/api/register", {
+            method: "POST",
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            setMessage(data.error || "Erro ao cadastrar.", true);
+            return;
+        }
+
+        currentUser = data.user;
+        showLoggedArea(currentUser);
+        setMessage(data.message || "Cadastro realizado com sucesso.");
+        registerForm.reset();
+    } catch (error) {
+        console.error(error);
+        setMessage("Erro ao cadastrar usuário.", true);
+    }
 });
 
-server.listen(PORT, () => {
-    console.log(`Servidor rodando em http://localhost:${PORT}`);
+loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+        const formData = new FormData(loginForm);
+        const payload = {
+            email: formData.get("email"),
+            password: formData.get("password")
+        };
+
+        const response = await fetch("/api/login", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            setMessage(data.error || "Erro ao fazer login.", true);
+            return;
+        }
+
+        currentUser = data.user;
+        showLoggedArea(currentUser);
+        setMessage(data.message || "Login realizado com sucesso.");
+        loginForm.reset();
+    } catch (error) {
+        console.error(error);
+        setMessage("Erro ao fazer login.", true);
+    }
 });
+
+startTrackingBtn.addEventListener("click", startTracking);
+
+logoutBtn.addEventListener("click", async () => {
+    try {
+        stopTracking();
+
+        const response = await fetch("/api/remove-user", {
+            method: "POST"
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            setMessage(data.error || "Erro ao sair.", true);
+            return;
+        }
+
+        if (currentUser) {
+            removeUserMarker(currentUser.id);
+        }
+
+        currentUser = null;
+        loggedUserCard.innerHTML = "";
+        showLogin();
+        setMessage(data.message || "Usuário saiu com sucesso.");
+    } catch (error) {
+        console.error(error);
+        setMessage("Erro ao sair.", true);
+    }
+});
+
+socket.on("userLocationUpdated", (user) => {
+    upsertUserMarker(user);
+});
+
+socket.on("userRemoved", ({ id }) => {
+    removeUserMarker(id);
+});
+
+loadUsers();
+loadMe();

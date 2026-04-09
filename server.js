@@ -19,10 +19,8 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// importante para ambientes com proxy, como Render
 app.set("trust proxy", 1);
 
-// cria pasta uploads se não existir
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -52,7 +50,6 @@ app.use(
 app.use("/uploads", express.static(uploadDir));
 app.use(express.static(path.join(__dirname, "public")));
 
-// upload
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, uploadDir);
@@ -65,20 +62,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// banco fake em memória
 const users = [];
-
-/*
-{
-  id,
-  name,
-  email,
-  password,
-  photo,
-  lat,
-  lng
-}
-*/
 
 function sanitizeUser(user) {
     return {
@@ -101,7 +85,6 @@ function sanitizePublicUser(user) {
     };
 }
 
-// cadastro
 app.post("/api/register", upload.single("photo"), (req, res) => {
     try {
         const { name, email, password } = req.body;
@@ -140,7 +123,6 @@ app.post("/api/register", upload.single("photo"), (req, res) => {
     }
 });
 
-// login
 app.post("/api/login", (req, res) => {
     try {
         const { email, password } = req.body;
@@ -167,7 +149,6 @@ app.post("/api/login", (req, res) => {
     }
 });
 
-// usuário logado
 app.get("/api/me", (req, res) => {
     const user = users.find((u) => u.id === req.session.userId);
 
@@ -178,12 +159,10 @@ app.get("/api/me", (req, res) => {
     return res.json(sanitizeUser(user));
 });
 
-// listar usuários
 app.get("/api/users", (req, res) => {
     return res.json(users.map(sanitizePublicUser));
 });
 
-// atualizar localização por HTTP
 app.post("/api/location", (req, res) => {
     const { userId, lat, lng } = req.body;
 
@@ -205,7 +184,6 @@ app.post("/api/location", (req, res) => {
     return res.json({ message: "Localização atualizada com sucesso." });
 });
 
-// sair e remover do mapa, mantendo cadastro
 app.post("/api/remove-user", (req, res) => {
     const userId = req.session.userId;
 
@@ -233,7 +211,6 @@ app.post("/api/remove-user", (req, res) => {
     });
 });
 
-// logout comum
 app.post("/api/logout", (req, res) => {
     req.session.destroy((err) => {
         if (err) {
@@ -244,7 +221,6 @@ app.post("/api/logout", (req, res) => {
     });
 });
 
-// socket.io
 io.on("connection", (socket) => {
     console.log("Cliente conectado:", socket.id);
 
