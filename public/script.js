@@ -36,17 +36,18 @@ function getPhotoUrl(photo) {
 
 function createAvatarHTML(user) {
     const photoUrl = getPhotoUrl(user.photo);
+    const color = user.color || "#2563eb";
 
     if (photoUrl) {
         return `
-            <div class="marker-avatar">
+            <div class="marker-avatar" style="background:${color}">
                 <img src="${photoUrl}" alt="${user.name}">
             </div>
         `;
     }
 
     return `
-        <div class="marker-avatar">
+        <div class="marker-avatar" style="background:${color}">
             ${getInitial(user.name)}
         </div>
     `;
@@ -54,10 +55,11 @@ function createAvatarHTML(user) {
 
 function createUserCardHTML(user) {
     const photoUrl = getPhotoUrl(user.photo);
+    const color = user.color || "#2563eb";
 
     return `
         <div class="user-badge">
-            <div class="user-avatar">
+            <div class="user-avatar" style="background:${color}">
                 ${photoUrl
             ? `<img src="${photoUrl}" alt="${user.name}">`
             : getInitial(user.name)
@@ -73,10 +75,11 @@ function createUserCardHTML(user) {
 
 function createPopupHTML(user) {
     const photoUrl = getPhotoUrl(user.photo);
+    const color = user.color || "#2563eb";
 
     return `
         <div class="popup-user">
-            <div class="marker-avatar">
+            <div class="marker-avatar" style="background:${color}">
                 ${photoUrl
             ? `<img src="${photoUrl}" alt="${user.name}">`
             : getInitial(user.name)
@@ -179,8 +182,14 @@ async function loadMe() {
 
         const user = await response.json();
         showLoggedArea(user);
+
+        if (typeof user.lat === "number" && typeof user.lng === "number") {
+            upsertUserMarker(user);
+            map.setView([user.lat, user.lng], 16);
+        }
     } catch (error) {
         console.error("Erro ao carregar usuário logado:", error);
+        showRegister();
     }
 }
 

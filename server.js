@@ -64,12 +64,22 @@ const upload = multer({ storage });
 
 const users = [];
 
+function generateRandomColor() {
+    const letters = "0123456789ABCDEF";
+    let color = "#";
+    for (let i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+}
+
 function sanitizeUser(user) {
     return {
         id: user.id,
         name: user.name,
         email: user.email,
         photo: user.photo,
+        color: user.color,
         lat: user.lat,
         lng: user.lng
     };
@@ -80,6 +90,7 @@ function sanitizePublicUser(user) {
         id: user.id,
         name: user.name,
         photo: user.photo,
+        color: user.color,
         lat: user.lat,
         lng: user.lng
     };
@@ -106,6 +117,7 @@ app.post("/api/register", upload.single("photo"), (req, res) => {
             email: normalizedEmail,
             password: String(password),
             photo: req.file ? `/uploads/${req.file.filename}` : null,
+            color: generateRandomColor(),
             lat: null,
             lng: null
         };
