@@ -15,6 +15,11 @@ const loggedUserCard = document.getElementById("loggedUserCard");
 const messageEl = document.getElementById("message");
 const startTrackingBtn = document.getElementById("startTrackingBtn");
 const logoutBtn = document.getElementById("logoutBtn");
+const loadingEl = document.getElementById("loadingLocation");
+const overlayNotification = document.getElementById("overlayNotification");
+const overlayIcon = document.getElementById("overlayIcon");
+const overlayTitle = document.getElementById("overlayTitle");
+const overlayText = document.getElementById("overlayText");
 
 let currentUser = null;
 let watchId = null;
@@ -235,6 +240,12 @@ function startTracking() {
         return;
     }
 
+    showOverlay(
+        "Ativando localização",
+        "Estamos buscando sua localização em tempo real...",
+        "📡"
+    );
+
     watchId = navigator.geolocation.watchPosition(
         async (position) => {
             const lat = position.coords.latitude;
@@ -247,10 +258,13 @@ function startTracking() {
             map.setView([lat, lng], 16);
 
             await sendLocation(lat, lng);
+
+            hideOverlay();
             setMessage("Localização em tempo real ativada.");
         },
         (error) => {
             console.error(error);
+            hideOverlay();
             setMessage("Não foi possível obter sua localização.", true);
         },
         {
@@ -266,6 +280,8 @@ function stopTracking() {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
     }
+
+    hideOverlay();
 }
 
 tabRegister.addEventListener("click", showRegister);
@@ -338,6 +354,12 @@ startTrackingBtn.addEventListener("click", startTracking);
 
 logoutBtn.addEventListener("click", async () => {
     try {
+        showOverlay(
+            "Saindo do mapa",
+            "Removendo sua localização da tela...",
+            "🚪"
+        );
+
         stopTracking();
 
         const response = await fetch("/api/remove-user", {
@@ -347,6 +369,7 @@ logoutBtn.addEventListener("click", async () => {
         const data = await response.json();
 
         if (!response.ok) {
+            hideOverlay();
             setMessage(data.error || "Erro ao sair.", true);
             return;
         }
@@ -359,8 +382,16 @@ logoutBtn.addEventListener("click", async () => {
         loggedUserCard.innerHTML = "";
         showLogin();
         setMessage(data.message || "Usuário saiu com sucesso.");
+
+        showTemporaryOverlay(
+            "Você saiu",
+            "Sua localização foi removida com sucesso.",
+            "✅",
+            2000
+        );
     } catch (error) {
         console.error(error);
+        hideOverlay();
         setMessage("Erro ao sair.", true);
     }
 });
@@ -375,3 +406,22 @@ socket.on("userRemoved", ({ id }) => {
 
 loadUsers();
 loadMe();
+
+function showOverlay(title, text, icon = "📍") {
+    overlayTitle.textContent = title;
+    overlayText.textContent = text;
+    overlayIcon.textContent = icon;
+    overlayNotification.classList.remove("hidden");
+}
+
+function hideOverlay() {
+    overlayNotification.classList.add("hidden");
+}
+
+function showTemporaryOverlay(title, text, icon = "✅", duration = 2000) {
+    showOverlay(title, text, icon);
+
+    setTimeout(() => {
+        hideOverlay();
+    }, duration);
+}

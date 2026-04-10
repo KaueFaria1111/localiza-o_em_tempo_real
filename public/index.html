@@ -43,6 +43,18 @@
             <button id="startTrackingBtn" type="button">Ativar localização em tempo real</button>
             <button id="logoutBtn" type="button" class="logout">Sair</button>
         </div>
+
+        <div id="loadingLocation" class="loading hidden">
+            <div class="spinner"></div>
+            <span>Obtendo localização...</span>
+        </div>
+    </div>
+    <div id="overlayNotification" class="overlay-notification hidden">
+        <div class="overlay-card">
+            <div id="overlayIcon" class="overlay-icon">📍</div>
+            <h3 id="overlayTitle">Ativando localização</h3>
+            <p id="overlayText">Estamos buscando sua localização em tempo real...</p>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
